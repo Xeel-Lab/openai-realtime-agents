@@ -50,11 +50,13 @@ export function useRealtimeSession(callbacks: RealtimeSessionCallbacks = {}) {
         historyHandlers.handleTranscriptionCompleted(event);
         break;
       }
-      case "response.audio_transcript.done": {
+      case "response.audio_transcript.done":
+      case "response.output_audio_transcript.done": {
         historyHandlers.handleTranscriptionCompleted(event);
         break;
       }
-      case "response.audio_transcript.delta": {
+      case "response.audio_transcript.delta":
+      case "response.output_audio_transcript.delta": {
         historyHandlers.handleTranscriptionDelta(event);
         break;
       }

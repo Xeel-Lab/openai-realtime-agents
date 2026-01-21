@@ -27,14 +27,13 @@ import { chatSupervisorScenario } from "@/app/agentConfigs/chatSupervisor";
 import { customerServiceRetailCompanyName } from "@/app/agentConfigs/customerServiceRetail";
 import { chatSupervisorCompanyName } from "@/app/agentConfigs/chatSupervisor";
 import { simpleHandoffScenario } from "@/app/agentConfigs/simpleHandoff";
-import { italianConversationScenario } from "@/app/agentConfigs/italianConversation";
+import { getItalianConversationScenarioWithMCP } from "@/app/agentConfigs/italianConversation";
 
 // Map used by connect logic for scenarios defined via the SDK.
 const sdkScenarioMap: Record<string, RealtimeAgent[]> = {
   simpleHandoff: simpleHandoffScenario,
   customerServiceRetail: customerServiceRetailScenario,
   chatSupervisor: chatSupervisorScenario,
-  italianConversation: italianConversationScenario,
 };
 
 import useAudioDownload from "./hooks/useAudioDownload";
@@ -137,6 +136,14 @@ function App() {
 
   useEffect(() => {
     let finalAgentConfig = searchParams.get("agentConfig");
+    
+    // Italian conversation is handled separately (async with MCP), so skip validation/initialization here
+    if (finalAgentConfig === 'italianConversation') {
+      setSelectedAgentName('italianAgent');
+      setSelectedAgentConfigSet(null); // Will be set when connection is established
+      return;
+    }
+    
     if (!finalAgentConfig || !allAgentSets[finalAgentConfig]) {
       finalAgentConfig = defaultAgentSetKey;
       const url = new URL(window.location.toString());
@@ -200,6 +207,63 @@ function App() {
 
   const connectToRealtime = async () => {
     const agentSetKey = searchParams.get("agentConfig") || "default";
+    
+    // Handle Italian conversation with MCP (async loading)
+    if (agentSetKey === 'italianConversation') {
+      if (sessionStatus !== "DISCONNECTED") return;
+      setSessionStatus("CONNECTING");
+
+      try {
+        const EPHEMERAL_KEY = await fetchEphemeralKey();
+        if (!EPHEMERAL_KEY) return;
+
+        // Get scenario with MCP (async) - may return agents without MCP if connection failed
+        const result = await getItalianConversationScenarioWithMCP();
+        const { agents, mcpConnected, error } = result;
+        
+        // Show error notification if MCP failed, but continue with connection
+        if (!mcpConnected && error) {
+          console.warn("MCP Connection Warning:", error);
+          // Show non-blocking notification to user
+          if (typeof window !== 'undefined') {
+            window.alert(error);
+          }
+        }
+        
+        // Update selectedAgentConfigSet so dropdown has agents
+        setSelectedAgentConfigSet(agents);
+        
+        // Reorder agents if needed
+        const reorderedAgents = [...agents];
+        const idx = reorderedAgents.findIndex((a) => a.name === selectedAgentName);
+        if (idx > 0) {
+          const [agent] = reorderedAgents.splice(idx, 1);
+          reorderedAgents.unshift(agent);
+        }
+
+        const guardrail = createModerationGuardrail('Assistant');
+
+        await connect({
+          getEphemeralKey: async () => EPHEMERAL_KEY,
+          initialAgents: reorderedAgents,
+          audioElement: sdkAudioElement,
+          outputGuardrails: [guardrail],
+          extraContext: {
+            addTranscriptBreadcrumb,
+          },
+        });
+      } catch (err) {
+        console.error("Error connecting via SDK:", err);
+        const errorMessage = err instanceof Error 
+          ? err.message 
+          : "Failed to connect to realtime session.";
+        window.alert(`Connection Error: ${errorMessage}`);
+        setSessionStatus("DISCONNECTED");
+      }
+      return;
+    }
+    
+    // Handle other agent configs (synchronous loading)
     if (sdkScenarioMap[agentSetKey]) {
       if (sessionStatus !== "DISCONNECTED") return;
       setSessionStatus("CONNECTING");
@@ -473,6 +537,7 @@ function App() {
                   {agentKey}
                 </option>
               ))}
+              <option value="italianConversation">italianConversation</option>
             </select>
             <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2 text-gray-600">
               <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
